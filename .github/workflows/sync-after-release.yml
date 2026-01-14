@@ -39,22 +39,22 @@ jobs:
           # Push to remote
           git push origin release
           
-          # Step 2: Create and Auto-Merge PR from Release to Main
-          - name: Create PR to Main
-            env:
-              GH_TOKEN: ${{ secrets.PROTECTED_BRANCHES_TOKEN }} # Use PAT to bypass "Actions cannot trigger other workflows" limits
-            run: |
-              # 1. Create the Pull Request
-              # --base: where we want to merge INTO (main)
-              # --head: where changes come FROM (release)
-              pr_url=$(gh pr create \
-                --base main \
-                --head release \
-                --title "chore: Sync release to main (v${{ github.event.client_payload.version }})" \
-                --body "Automated PR to sync changes from release branch to main after production deployment.")
-          
-              echo "PR Created: $pr_url"
-          
-              # 2. Enable Auto-Merge
-              # This tells GitHub: "As soon as all status checks pass, merge this."
-              gh pr merge "$pr_url" --auto --merge
+      # Step 2: Create and Auto-Merge PR from Release to Main
+      - name: Create PR to Main
+        env:
+          GH_TOKEN: ${{ secrets.PROTECTED_BRANCHES_TOKEN }} # Use PAT to bypass "Actions cannot trigger other workflows" limits
+        run: |
+          # 1. Create the Pull Request
+          # --base: where we want to merge INTO (main)
+          # --head: where changes come FROM (release)
+          pr_url=$(gh pr create \
+            --base main \
+            --head release \
+            --title "chore: Sync release to main (v${{ github.event.client_payload.version }})" \
+            --body "Automated PR to sync changes from release branch to main after production deployment.")
+      
+          echo "PR Created: $pr_url"
+      
+          # 2. Enable Auto-Merge
+          # This tells GitHub: "As soon as all status checks pass, merge this."
+          gh pr merge "$pr_url" --auto --merge
