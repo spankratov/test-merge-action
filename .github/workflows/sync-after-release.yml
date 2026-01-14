@@ -1,0 +1,54 @@
+name: Sync Branches After Release
+
+on:
+  repository_dispatch:
+    types: [production-deployed]
+
+jobs:
+  sync-branches:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # If your branches are protected, you MUST use a PAT here, not the default GITHUB_TOKEN
+          token: ${{ secrets.PROTECTED_BRANCHES_TOKEN }}
+
+      - name: Configure Git Bot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge Release Candidate to Release Branch
+        id: merge-release
+        run: |
+          # Extract version from the payload sent by Concourse
+          VERSION="${{ github.event.client_payload.version }}"
+          RC_BRANCH="releases/v$VERSION"
+
+          echo "Detected version: $VERSION"
+          echo "Syncing $RC_BRANCH -> release"
+
+          # Checkout 'release' branch
+          git checkout release
+          
+          # Merge the specific release version branch
+          git merge "origin/$RC_BRANCH" --no-edit
+          
+          # Push to remote
+          git push origin release
+
+      - name: Merge Release to Main
+        id: merge-main
+        run: |
+          echo "Syncing release -> main"
+          
+          # Checkout 'main' branch
+          git checkout main
+          
+          # Merge the updated release branch
+          git merge origin/release --no-edit
+          
+          # Push to remote
+          git push origin main
