@@ -12,7 +12,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # If your branches are protected, you MUST use a PAT here, not the default GITHUB_TOKEN
           token: ${{ secrets.PROTECTED_BRANCHES_TOKEN }}
 
       - name: Configure Git Bot
@@ -39,10 +38,9 @@ jobs:
           # Push to remote
           git push origin release
           
-      # Step 2: Create and Auto-Merge PR from Release to Main
       - name: Create PR to Main
         env:
-          GH_TOKEN: ${{ secrets.PROTECTED_BRANCHES_TOKEN }} # Use PAT to bypass "Actions cannot trigger other workflows" limits
+          GH_TOKEN: ${{ secrets.PROTECTED_BRANCHES_TOKEN }}
         run: |
           # 1. Create the Pull Request
           # --base: where we want to merge INTO (main)
