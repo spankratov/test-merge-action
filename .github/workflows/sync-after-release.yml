@@ -29,22 +29,16 @@ jobs:
           echo "Detected version: $VERSION"
           echo "Syncing $RC_BRANCH -> release"
 
-          # Checkout 'release' branch
           git checkout release
           
-          # Merge the specific release version branch
           git merge "origin/$RC_BRANCH" --no-edit
           
-          # Push to remote
           git push origin release
           
       - name: Create PR to Main
         env:
           GH_TOKEN: ${{ secrets.PROTECTED_BRANCHES_TOKEN }}
         run: |
-          # 1. Create the Pull Request
-          # --base: where we want to merge INTO (main)
-          # --head: where changes come FROM (release)
           pr_url=$(gh pr create \
             --base main \
             --head release \
@@ -53,6 +47,4 @@ jobs:
       
           echo "PR Created: $pr_url"
       
-          # 2. Enable Auto-Merge
-          # This tells GitHub: "As soon as all status checks pass, merge this."
-          gh pr merge "$pr_url" --auto --merge
+          gh pr merge "$pr_url" --merge
