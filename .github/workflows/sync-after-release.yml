@@ -12,7 +12,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.PROTECTED_BRANCHES_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure Git Bot
         run: |
@@ -35,16 +35,12 @@ jobs:
           
           git push origin release
           
-      - name: Create PR to Main
+      - name: Merge Release Branch to Main
         env:
           GH_TOKEN: ${{ secrets.PROTECTED_BRANCHES_TOKEN }}
         run: |
-          pr_url=$(gh pr create \
-            --base main \
-            --head release \
-            --title "chore: Sync release to main (v${{ github.event.client_payload.version }})" \
-            --body "Automated PR to sync changes from release branch to main after production deployment.")
-      
-          echo "PR Created: $pr_url"
-      
-          gh pr merge "$pr_url" --merge
+          git checkout main
+          
+          git merge origin/release --no-edit
+          
+          git push origin main
