@@ -39,10 +39,14 @@ jobs:
           
       - name: Merge Release Branch to Main
         env:
-          GH_TOKEN: ${{ secrets.PROTECTED_BRANCHES_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git checkout main
-          
-          git merge origin/release --no-edit
-          
-          git push origin main
+          pr_url=$(gh pr create \
+            --base main \
+            --head release \
+            --title "chore: Sync release to main (v${{ github.event.client_payload.version }})" \
+            --body "Automated PR to sync changes from release branch to main after production deployment.")
+
+          echo "PR Created: $pr_url"
+
+          gh pr merge "$pr_url" --merge
