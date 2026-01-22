@@ -22,6 +22,47 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      - name: Wait for Status Checks on Release Candidate Branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ github.event.client_payload.version }}"
+          RC_BRANCH="releases/v$VERSION"
+
+          echo "Waiting for status checks on $RC_BRANCH..."
+
+          # Get the latest commit SHA on the RC branch
+          COMMIT_SHA=$(git rev-parse "origin/$RC_BRANCH")
+          echo "Checking commit: $COMMIT_SHA"
+
+          # Wait for all checks to complete
+          MAX_ATTEMPTS=60
+          ATTEMPT=0
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            # Get the combined status for the commit
+            STATUS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/status" --jq '.state')
+
+            echo "Attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS: Status is '$STATUS'"
+
+            if [ "$STATUS" = "success" ]; then
+              echo "All status checks passed!"
+              break
+            elif [ "$STATUS" = "failure" ] || [ "$STATUS" = "error" ]; then
+              echo "Status checks failed!"
+              exit 1
+            fi
+
+            # Wait 10 seconds before checking again
+            sleep 10
+            ATTEMPT=$((ATTEMPT + 1))
+          done
+
+          if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+            echo "Timeout waiting for status checks"
+            exit 1
+          fi
+
       - name: Merge Release Candidate to Release Branch
         id: merge-release
         run: |
@@ -37,7 +78,48 @@ jobs:
           git merge "origin/$RC_BRANCH" --no-edit
           
           git push origin release
-          
+
+      - name: Wait for Status Checks on Release Branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Waiting for status checks on release branch..."
+
+          # Fetch the latest state of release branch
+          git fetch origin release
+
+          # Get the latest commit SHA on the release branch
+          COMMIT_SHA=$(git rev-parse origin/release)
+          echo "Checking commit: $COMMIT_SHA"
+
+          # Wait for all checks to complete
+          MAX_ATTEMPTS=60
+          ATTEMPT=0
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            # Get the combined status for the commit
+            STATUS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/status" --jq '.state')
+
+            echo "Attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS: Status is '$STATUS'"
+
+            if [ "$STATUS" = "success" ]; then
+              echo "All status checks passed!"
+              break
+            elif [ "$STATUS" = "failure" ] || [ "$STATUS" = "error" ]; then
+              echo "Status checks failed!"
+              exit 1
+            fi
+
+            # Wait 10 seconds before checking again
+            sleep 10
+            ATTEMPT=$((ATTEMPT + 1))
+          done
+
+          if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+            echo "Timeout waiting for status checks"
+            exit 1
+          fi
+
       - name: Merge Release Branch to Main
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
