@@ -1,0 +1,16 @@
+name: Mock Status Check
+
+on:
+  push:
+    branches:
+      - '**'
+
+jobs:
+  mock-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mock Status Check
+        run: |
+          echo "Running mock status check..."
+          sleep 10
+          echo "Mock status check completed successfully!"
