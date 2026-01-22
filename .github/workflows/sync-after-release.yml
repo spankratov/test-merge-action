@@ -40,26 +40,46 @@ jobs:
           ATTEMPT=0
 
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-            # Get the combined status for the commit
-            STATUS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/status" --jq '.state')
+            echo "Attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS"
 
-            echo "Attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS: Status is '$STATUS'"
+            # Get all check runs for the commit
+            CHECK_RUNS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" --jq '.check_runs')
 
-            if [ "$STATUS" = "success" ]; then
-              echo "All status checks passed!"
-              break
-            elif [ "$STATUS" = "failure" ] || [ "$STATUS" = "error" ]; then
-              echo "Status checks failed!"
+            TOTAL_CHECKS=$(echo "$CHECK_RUNS" | jq 'length')
+            echo "Total checks: $TOTAL_CHECKS"
+
+            if [ "$TOTAL_CHECKS" -eq 0 ]; then
+              echo "No checks found yet, waiting..."
+              sleep 10
+              ATTEMPT=$((ATTEMPT + 1))
+              continue
+            fi
+
+            # Check if all check runs are completed
+            INCOMPLETE=$(echo "$CHECK_RUNS" | jq '[.[] | select(.status != "completed")] | length')
+
+            if [ "$INCOMPLETE" -gt 0 ]; then
+              echo "Checks still running: $INCOMPLETE incomplete"
+              sleep 10
+              ATTEMPT=$((ATTEMPT + 1))
+              continue
+            fi
+
+            # All checks completed, now check if all succeeded
+            FAILED=$(echo "$CHECK_RUNS" | jq '[.[] | select(.conclusion != "success" and .conclusion != "skipped")] | length')
+
+            if [ "$FAILED" -gt 0 ]; then
+              echo "Check runs failed!"
+              echo "$CHECK_RUNS" | jq '.[] | select(.conclusion != "success" and .conclusion != "skipped") | {name: .name, conclusion: .conclusion}'
               exit 1
             fi
 
-            # Wait 10 seconds before checking again
-            sleep 10
-            ATTEMPT=$((ATTEMPT + 1))
+            echo "All check runs passed!"
+            break
           done
 
           if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
-            echo "Timeout waiting for status checks"
+            echo "Timeout waiting for check runs"
             exit 1
           fi
 
@@ -97,26 +117,46 @@ jobs:
           ATTEMPT=0
 
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-            # Get the combined status for the commit
-            STATUS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/status" --jq '.state')
+            echo "Attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS"
 
-            echo "Attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS: Status is '$STATUS'"
+            # Get all check runs for the commit
+            CHECK_RUNS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" --jq '.check_runs')
 
-            if [ "$STATUS" = "success" ]; then
-              echo "All status checks passed!"
-              break
-            elif [ "$STATUS" = "failure" ] || [ "$STATUS" = "error" ]; then
-              echo "Status checks failed!"
+            TOTAL_CHECKS=$(echo "$CHECK_RUNS" | jq 'length')
+            echo "Total checks: $TOTAL_CHECKS"
+
+            if [ "$TOTAL_CHECKS" -eq 0 ]; then
+              echo "No checks found yet, waiting..."
+              sleep 10
+              ATTEMPT=$((ATTEMPT + 1))
+              continue
+            fi
+
+            # Check if all check runs are completed
+            INCOMPLETE=$(echo "$CHECK_RUNS" | jq '[.[] | select(.status != "completed")] | length')
+
+            if [ "$INCOMPLETE" -gt 0 ]; then
+              echo "Checks still running: $INCOMPLETE incomplete"
+              sleep 10
+              ATTEMPT=$((ATTEMPT + 1))
+              continue
+            fi
+
+            # All checks completed, now check if all succeeded
+            FAILED=$(echo "$CHECK_RUNS" | jq '[.[] | select(.conclusion != "success" and .conclusion != "skipped")] | length')
+
+            if [ "$FAILED" -gt 0 ]; then
+              echo "Check runs failed!"
+              echo "$CHECK_RUNS" | jq '.[] | select(.conclusion != "success" and .conclusion != "skipped") | {name: .name, conclusion: .conclusion}'
               exit 1
             fi
 
-            # Wait 10 seconds before checking again
-            sleep 10
-            ATTEMPT=$((ATTEMPT + 1))
+            echo "All check runs passed!"
+            break
           done
 
           if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
-            echo "Timeout waiting for status checks"
+            echo "Timeout waiting for check runs"
             exit 1
           fi
 
