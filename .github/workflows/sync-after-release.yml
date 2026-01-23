@@ -117,4 +117,6 @@ jobs:
 
           echo "PR Created: $pr_url"
 
-          gh pr merge "$pr_url" --merge
+          # Use --admin flag to bypass "branch must be up to date" requirement
+          # This allows the merge even if release is behind main
+          gh pr merge "$pr_url" --merge --admin
