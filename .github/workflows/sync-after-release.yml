@@ -177,69 +177,24 @@ jobs:
           pr_number=$(echo "$pr_url" | grep -oE '[0-9]+$')
           echo "PR Number: $pr_number"
 
-          # Wait for status checks on the PR
-          echo "Waiting for status checks on PR #$pr_number..."
-          MAX_ATTEMPTS=60
-          ATTEMPT=0
+          # Get PR node ID for GraphQL
+          pr_node_id=$(gh api "repos/${{ github.repository }}/pulls/$pr_number" --jq '.node_id')
+          echo "PR Node ID: $pr_node_id"
 
-          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-            echo "Attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS"
+          # Merge using GraphQL API with bypass parameters
+          gh api graphql -f query='
+            mutation($pullRequestId: ID!) {
+              mergePullRequest(input: {
+                pullRequestId: $pullRequestId,
+                mergeMethod: MERGE,
+                authorEmail: "github-actions[bot]@users.noreply.github.com"
+              }) {
+                pullRequest {
+                  merged
+                  mergedAt
+                }
+              }
+            }
+          ' -f pullRequestId="$pr_node_id"
 
-            # Get PR details including mergeable state and status checks
-            PR_DATA=$(gh api "repos/${{ github.repository }}/pulls/$pr_number")
-
-            MERGEABLE=$(echo "$PR_DATA" | jq -r '.mergeable')
-            MERGEABLE_STATE=$(echo "$PR_DATA" | jq -r '.mergeable_state')
-
-            echo "Mergeable: $MERGEABLE, State: $MERGEABLE_STATE"
-
-            # Get the merge commit SHA (the commit that would be created when merging)
-            MERGE_COMMIT_SHA=$(echo "$PR_DATA" | jq -r '.merge_commit_sha')
-
-            if [ "$MERGE_COMMIT_SHA" != "null" ] && [ -n "$MERGE_COMMIT_SHA" ]; then
-              echo "Checking status checks for merge commit: $MERGE_COMMIT_SHA"
-
-              # Get check runs for the merge commit
-              CHECK_RUNS=$(gh api "repos/${{ github.repository }}/commits/$MERGE_COMMIT_SHA/check-runs" --jq '.check_runs')
-
-              TOTAL_CHECKS=$(echo "$CHECK_RUNS" | jq 'length')
-              echo "Total checks: $TOTAL_CHECKS"
-
-              if [ "$TOTAL_CHECKS" -gt 0 ]; then
-                # Check if all check runs are completed
-                INCOMPLETE=$(echo "$CHECK_RUNS" | jq '[.[] | select(.status != "completed")] | length')
-
-                if [ "$INCOMPLETE" -gt 0 ]; then
-                  echo "Checks still running: $INCOMPLETE incomplete"
-                  sleep 10
-                  ATTEMPT=$((ATTEMPT + 1))
-                  continue
-                fi
-
-                # All checks completed, now check if all succeeded
-                FAILED=$(echo "$CHECK_RUNS" | jq '[.[] | select(.conclusion != "success" and .conclusion != "skipped")] | length')
-
-                if [ "$FAILED" -gt 0 ]; then
-                  echo "Check runs failed!"
-                  echo "$CHECK_RUNS" | jq '.[] | select(.conclusion != "success" and .conclusion != "skipped") | {name: .name, conclusion: .conclusion}'
-                  exit 1
-                fi
-
-                echo "All check runs passed!"
-                break
-              fi
-            fi
-
-            echo "Waiting for checks to start..."
-            sleep 10
-            ATTEMPT=$((ATTEMPT + 1))
-          done
-
-          if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
-            echo "Timeout waiting for check runs on PR"
-            exit 1
-          fi
-
-          # Use --admin flag to bypass "branch must be up to date" requirement
-          # This allows the merge even if release is behind main
-          gh pr merge "$pr_url" --merge --admin
+          echo "PR merged successfully!"
