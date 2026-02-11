@@ -181,13 +181,14 @@ jobs:
           pr_node_id=$(gh api "repos/${{ github.repository }}/pulls/$pr_number" --jq '.node_id')
           echo "PR Node ID: $pr_node_id"
 
-          # Merge using GraphQL API with bypass parameters
+          # Merge using GraphQL API
+          # Note: This may still fail if branch protection requires checks on the merge commit
+          # and github-actions doesn't have bypass permissions in the ruleset
           gh api graphql -f query='
             mutation($pullRequestId: ID!) {
               mergePullRequest(input: {
                 pullRequestId: $pullRequestId,
-                mergeMethod: MERGE,
-                authorEmail: "github-actions[bot]@users.noreply.github.com"
+                mergeMethod: MERGE
               }) {
                 pullRequest {
                   merged
