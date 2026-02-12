@@ -3,7 +3,8 @@ name: Mock Status Check
 on:
   push:
     branches:
-      - '**'
+      - main
+  pull_request:
 
 jobs:
   mock-check:
