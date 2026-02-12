@@ -209,8 +209,12 @@ jobs:
           echo "PR Created: $pr_url"
 
           # Since the intermediate branch is up-to-date with main and checks have passed,
-          # the merge should succeed
-          gh pr merge "$pr_url" --merge --auto
+          # the PR should be ready to merge immediately.
+          # We try direct merge first, and fall back to auto-merge if checks are still pending.
+          if ! gh pr merge "$pr_url" --merge; then
+            echo "Direct merge failed, enabling auto-merge..."
+            gh pr merge "$pr_url" --merge --auto
+          fi
 
           echo "PR merged successfully!"
 
