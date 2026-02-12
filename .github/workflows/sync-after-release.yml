@@ -114,6 +114,7 @@ jobs:
           git push origin release
 
       - name: Create Intermediate Branch and Merge Main
+        id: create-intermediate
         run: |
           VERSION="${{ inputs.version }}"
           INTERMEDIATE_BRANCH="sync-release-to-main-v$VERSION"
@@ -127,6 +128,11 @@ jobs:
           echo "Merging main into $INTERMEDIATE_BRANCH..."
           git merge origin/main --no-edit -m "chore: Merge main into intermediate branch for sync"
 
+          # Get the commit SHA before pushing
+          COMMIT_SHA=$(git rev-parse HEAD)
+          echo "commit_sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
+          echo "Intermediate branch commit: $COMMIT_SHA"
+
           # Push intermediate branch
           git push origin "$INTERMEDIATE_BRANCH"
 
@@ -138,18 +144,14 @@ jobs:
         run: |
           VERSION="${{ inputs.version }}"
           INTERMEDIATE_BRANCH="sync-release-to-main-v$VERSION"
+          COMMIT_SHA="${{ steps.create-intermediate.outputs.commit_sha }}"
 
           echo "Waiting for status checks on $INTERMEDIATE_BRANCH..."
-
-          # Get the latest commit SHA on the intermediate branch
-          COMMIT_SHA=$(git rev-parse "origin/$INTERMEDIATE_BRANCH")
           echo "Checking commit: $COMMIT_SHA"
 
           # Wait for checks to appear and complete
-          # If no checks appear after initial wait, assume no checks are configured for this branch
           MAX_ATTEMPTS=60
           ATTEMPT=0
-          NO_CHECKS_THRESHOLD=6  # After 6 attempts (60 seconds), assume no checks are configured
 
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
             echo "Attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS"
@@ -161,11 +163,6 @@ jobs:
             echo "Total checks: $TOTAL_CHECKS"
 
             if [ "$TOTAL_CHECKS" -eq 0 ]; then
-              if [ $ATTEMPT -ge $NO_CHECKS_THRESHOLD ]; then
-                echo "No checks configured for this branch after $NO_CHECKS_THRESHOLD attempts."
-                echo "Proceeding since checks already passed on release candidate branch."
-                break
-              fi
               echo "No checks found yet, waiting..."
               sleep 10
               ATTEMPT=$((ATTEMPT + 1))
@@ -215,13 +212,9 @@ jobs:
 
           echo "PR Created: $pr_url"
 
-          # Since the intermediate branch is up-to-date with main and checks have passed,
+          # Since we waited for all required status checks to pass on the intermediate branch,
           # the PR should be ready to merge immediately.
-          # We try direct merge first, and fall back to auto-merge if checks are still pending.
-          if ! gh pr merge "$pr_url" --merge; then
-            echo "Direct merge failed, enabling auto-merge..."
-            gh pr merge "$pr_url" --merge --auto
-          fi
+          gh pr merge "$pr_url" --merge
 
           echo "PR merged successfully!"
 
