@@ -1,0 +1,188 @@
+name: Sync Branches After Release (Simple)
+
+# This workflow is for repositories WITHOUT the "Require branches to be up to date before merging" setting.
+# It waits for checks on the release branch, then creates a PR directly from release to main.
+#
+# For repositories WITH strict branch protection that requires branches to be up to date,
+# use sync-after-release.yml instead (which creates an intermediate branch).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number'
+        required: true
+        type: string
+
+jobs:
+  sync-branches:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git Bot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Wait for Status Checks on Release Candidate Branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ inputs.version }}"
+          RC_BRANCH="releases/v$VERSION"
+
+          echo "Waiting for status checks on $RC_BRANCH..."
+
+          # Get the latest commit SHA on the RC branch
+          COMMIT_SHA=$(git rev-parse "origin/$RC_BRANCH")
+          echo "Checking commit: $COMMIT_SHA"
+
+          # Wait for all checks to complete
+          MAX_ATTEMPTS=60
+          ATTEMPT=0
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            echo "Attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS"
+
+            # Get all check runs for the commit
+            CHECK_RUNS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" --jq '.check_runs')
+
+            TOTAL_CHECKS=$(echo "$CHECK_RUNS" | jq 'length')
+            echo "Total checks: $TOTAL_CHECKS"
+
+            if [ "$TOTAL_CHECKS" -eq 0 ]; then
+              echo "No checks found yet, waiting..."
+              sleep 10
+              ATTEMPT=$((ATTEMPT + 1))
+              continue
+            fi
+
+            # Check if all check runs are completed
+            INCOMPLETE=$(echo "$CHECK_RUNS" | jq '[.[] | select(.status != "completed")] | length')
+
+            if [ "$INCOMPLETE" -gt 0 ]; then
+              echo "Checks still running: $INCOMPLETE incomplete"
+              sleep 10
+              ATTEMPT=$((ATTEMPT + 1))
+              continue
+            fi
+
+            # All checks completed, now check if all succeeded
+            FAILED=$(echo "$CHECK_RUNS" | jq '[.[] | select(.conclusion != "success" and .conclusion != "skipped")] | length')
+
+            if [ "$FAILED" -gt 0 ]; then
+              echo "Check runs failed!"
+              echo "$CHECK_RUNS" | jq '.[] | select(.conclusion != "success" and .conclusion != "skipped") | {name: .name, conclusion: .conclusion}'
+              exit 1
+            fi
+
+            echo "All check runs passed!"
+            break
+          done
+
+          if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+            echo "Timeout waiting for check runs"
+            exit 1
+          fi
+
+      - name: Merge Release Candidate to Release Branch
+        id: merge-release
+        run: |
+          # Extract version from the payload sent by Concourse
+          VERSION="${{ inputs.version }}"
+          RC_BRANCH="releases/v$VERSION"
+
+          echo "Detected version: $VERSION"
+          echo "Syncing $RC_BRANCH -> release"
+
+          git checkout release
+
+          git merge "origin/$RC_BRANCH" --no-edit
+
+          git push origin release
+
+      - name: Wait for Status Checks on Release Branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Waiting for status checks on release branch..."
+
+          # Get the latest commit SHA on the release branch
+          COMMIT_SHA=$(git rev-parse "origin/release")
+          echo "Checking commit: $COMMIT_SHA"
+
+          # Wait for all checks to complete
+          MAX_ATTEMPTS=60
+          ATTEMPT=0
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            echo "Attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS"
+
+            # Get all check runs for the commit
+            CHECK_RUNS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" --jq '.check_runs')
+
+            TOTAL_CHECKS=$(echo "$CHECK_RUNS" | jq 'length')
+            echo "Total checks: $TOTAL_CHECKS"
+
+            if [ "$TOTAL_CHECKS" -eq 0 ]; then
+              echo "No checks found yet, waiting..."
+              sleep 10
+              ATTEMPT=$((ATTEMPT + 1))
+              continue
+            fi
+
+            # Check if all check runs are completed
+            INCOMPLETE=$(echo "$CHECK_RUNS" | jq '[.[] | select(.status != "completed")] | length')
+
+            if [ "$INCOMPLETE" -gt 0 ]; then
+              echo "Checks still running: $INCOMPLETE incomplete"
+              sleep 10
+              ATTEMPT=$((ATTEMPT + 1))
+              continue
+            fi
+
+            # All checks completed, now check if all succeeded
+            FAILED=$(echo "$CHECK_RUNS" | jq '[.[] | select(.conclusion != "success" and .conclusion != "skipped")] | length')
+
+            if [ "$FAILED" -gt 0 ]; then
+              echo "Check runs failed!"
+              echo "$CHECK_RUNS" | jq '.[] | select(.conclusion != "success" and .conclusion != "skipped") | {name: .name, conclusion: .conclusion}'
+              exit 1
+            fi
+
+            echo "All check runs passed!"
+            break
+          done
+
+          if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+            echo "Timeout waiting for check runs"
+            exit 1
+          fi
+
+      - name: Create and Merge PR to Main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ inputs.version }}"
+
+          pr_url=$(gh pr create \
+            --base main \
+            --head release \
+            --title "chore: Sync release to main (v$VERSION)" \
+            --body "Automated PR to sync changes from release branch to main after production deployment.")
+
+          echo "PR Created: $pr_url"
+
+          # Merge the PR directly
+          # Note: This workflow is for repos WITHOUT "Require branches to be up to date before merging"
+          gh pr merge "$pr_url" --merge
+
+          echo "PR merged successfully!"
