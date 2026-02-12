@@ -138,16 +138,34 @@ jobs:
 
           echo "Intermediate branch created and pushed"
 
-      - name: Wait for Status Checks on Intermediate Branch
+      - name: Create PR to Main
+        id: create-pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ inputs.version }}"
           INTERMEDIATE_BRANCH="sync-release-to-main-v$VERSION"
-          COMMIT_SHA="${{ steps.create-intermediate.outputs.commit_sha }}"
 
-          echo "Waiting for status checks on $INTERMEDIATE_BRANCH..."
-          echo "Checking commit: $COMMIT_SHA"
+          pr_url=$(gh pr create \
+            --base main \
+            --head "$INTERMEDIATE_BRANCH" \
+            --title "chore: Sync release to main (v$VERSION)" \
+            --body "Automated PR to sync changes from release branch to main after production deployment.")
+
+          echo "PR Created: $pr_url"
+          echo "pr_url=$pr_url" >> $GITHUB_OUTPUT
+
+          # Extract PR number from URL
+          PR_NUMBER=$(echo "$pr_url" | grep -oE '[0-9]+$')
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+
+      - name: Wait for PR Status Checks
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER="${{ steps.create-pr.outputs.pr_number }}"
+
+          echo "Waiting for status checks on PR #$PR_NUMBER..."
 
           # Wait for checks to appear and complete
           MAX_ATTEMPTS=60
@@ -156,11 +174,21 @@ jobs:
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
             echo "Attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS"
 
+            # Get PR status checks using the checks API for the PR's head SHA
+            PR_DATA=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER" --jq '{sha: .head.sha, state: .mergeable_state}')
+            HEAD_SHA=$(echo "$PR_DATA" | jq -r '.sha')
+            MERGEABLE_STATE=$(echo "$PR_DATA" | jq -r '.state')
+
+            echo "Head SHA: $HEAD_SHA, Mergeable state: $MERGEABLE_STATE"
+
             # Get all check runs for the commit
-            CHECK_RUNS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" --jq '.check_runs')
+            CHECK_RUNS=$(gh api "repos/${{ github.repository }}/commits/$HEAD_SHA/check-runs" --jq '.check_runs')
+
+            # Filter out our own workflow from the check runs
+            CHECK_RUNS=$(echo "$CHECK_RUNS" | jq '[.[] | select(.name != "sync-branches")]')
 
             TOTAL_CHECKS=$(echo "$CHECK_RUNS" | jq 'length')
-            echo "Total checks: $TOTAL_CHECKS"
+            echo "Total checks (excluding this workflow): $TOTAL_CHECKS"
 
             if [ "$TOTAL_CHECKS" -eq 0 ]; then
               echo "No checks found yet, waiting..."
@@ -197,24 +225,15 @@ jobs:
             exit 1
           fi
 
-      - name: Create and Merge PR to Main
+      - name: Merge PR to Main
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="${{ inputs.version }}"
-          INTERMEDIATE_BRANCH="sync-release-to-main-v$VERSION"
+          PR_URL="${{ steps.create-pr.outputs.pr_url }}"
 
-          pr_url=$(gh pr create \
-            --base main \
-            --head "$INTERMEDIATE_BRANCH" \
-            --title "chore: Sync release to main (v$VERSION)" \
-            --body "Automated PR to sync changes from release branch to main after production deployment.")
+          echo "Merging PR: $PR_URL"
 
-          echo "PR Created: $pr_url"
-
-          # Since we waited for all required status checks to pass on the intermediate branch,
-          # the PR should be ready to merge immediately.
-          gh pr merge "$pr_url" --merge
+          gh pr merge "$PR_URL" --merge
 
           echo "PR merged successfully!"
 
