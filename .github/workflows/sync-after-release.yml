@@ -145,9 +145,11 @@ jobs:
           COMMIT_SHA=$(git rev-parse "origin/$INTERMEDIATE_BRANCH")
           echo "Checking commit: $COMMIT_SHA"
 
-          # Wait for all checks to complete
+          # Wait for checks to appear and complete
+          # If no checks appear after initial wait, assume no checks are configured for this branch
           MAX_ATTEMPTS=60
           ATTEMPT=0
+          NO_CHECKS_THRESHOLD=6  # After 6 attempts (60 seconds), assume no checks are configured
 
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
             echo "Attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS"
@@ -159,6 +161,11 @@ jobs:
             echo "Total checks: $TOTAL_CHECKS"
 
             if [ "$TOTAL_CHECKS" -eq 0 ]; then
+              if [ $ATTEMPT -ge $NO_CHECKS_THRESHOLD ]; then
+                echo "No checks configured for this branch after $NO_CHECKS_THRESHOLD attempts."
+                echo "Proceeding since checks already passed on release candidate branch."
+                break
+              fi
               echo "No checks found yet, waiting..."
               sleep 10
               ATTEMPT=$((ATTEMPT + 1))
