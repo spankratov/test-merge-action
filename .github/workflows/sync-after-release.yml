@@ -1,5 +1,15 @@
 name: Sync Branches After Release
 
+# This workflow is for repositories with STRICT branch protection that requires:
+# - "Require status checks to pass"
+# - "Require branches to be up to date before merging"
+#
+# It creates an intermediate branch, merges main into it, waits for checks,
+# then creates a PR to main. This ensures the branch is up-to-date and checks pass.
+#
+# For repositories WITHOUT the "Require branches to be up to date" setting,
+# use sync-after-release-simple.yml instead.
+
 on:
   workflow_dispatch:
     inputs:
@@ -103,14 +113,36 @@ jobs:
           
           git push origin release
 
-      - name: Wait for Status Checks on Release Branch
+      - name: Create Intermediate Branch and Merge Main
+        run: |
+          VERSION="${{ inputs.version }}"
+          INTERMEDIATE_BRANCH="sync-release-to-main-v$VERSION"
+
+          echo "Creating intermediate branch: $INTERMEDIATE_BRANCH"
+
+          # Create intermediate branch from release
+          git checkout -b "$INTERMEDIATE_BRANCH" origin/release
+
+          # Merge main into the intermediate branch to bring it up-to-date
+          echo "Merging main into $INTERMEDIATE_BRANCH..."
+          git merge origin/main --no-edit -m "chore: Merge main into intermediate branch for sync"
+
+          # Push intermediate branch
+          git push origin "$INTERMEDIATE_BRANCH"
+
+          echo "Intermediate branch created and pushed"
+
+      - name: Wait for Status Checks on Intermediate Branch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Waiting for status checks on release branch..."
+          VERSION="${{ inputs.version }}"
+          INTERMEDIATE_BRANCH="sync-release-to-main-v$VERSION"
 
-          # Get the latest commit SHA on the release branch
-          COMMIT_SHA=$(git rev-parse "origin/release")
+          echo "Waiting for status checks on $INTERMEDIATE_BRANCH..."
+
+          # Get the latest commit SHA on the intermediate branch
+          COMMIT_SHA=$(git rev-parse "origin/$INTERMEDIATE_BRANCH")
           echo "Checking commit: $COMMIT_SHA"
 
           # Wait for all checks to complete
@@ -161,41 +193,34 @@ jobs:
             exit 1
           fi
 
-      - name: Merge Release Branch to Main
+      - name: Create and Merge PR to Main
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          VERSION="${{ inputs.version }}"
+          INTERMEDIATE_BRANCH="sync-release-to-main-v$VERSION"
+
           pr_url=$(gh pr create \
             --base main \
-            --head release \
-            --title "chore: Sync release to main (v${{ inputs.version }})" \
+            --head "$INTERMEDIATE_BRANCH" \
+            --title "chore: Sync release to main (v$VERSION)" \
             --body "Automated PR to sync changes from release branch to main after production deployment.")
 
           echo "PR Created: $pr_url"
 
-          # Extract PR number from URL
-          pr_number=$(echo "$pr_url" | grep -oE '[0-9]+$')
-          echo "PR Number: $pr_number"
-
-          # Get PR node ID for GraphQL
-          pr_node_id=$(gh api "repos/${{ github.repository }}/pulls/$pr_number" --jq '.node_id')
-          echo "PR Node ID: $pr_node_id"
-
-          # Merge using GraphQL API
-          # Note: This may still fail if branch protection requires checks on the merge commit
-          # and github-actions doesn't have bypass permissions in the ruleset
-          gh api graphql -f query='
-            mutation($pullRequestId: ID!) {
-              mergePullRequest(input: {
-                pullRequestId: $pullRequestId,
-                mergeMethod: MERGE
-              }) {
-                pullRequest {
-                  merged
-                  mergedAt
-                }
-              }
-            }
-          ' -f pullRequestId="$pr_node_id"
+          # Since the intermediate branch is up-to-date with main and checks have passed,
+          # the merge should succeed
+          gh pr merge "$pr_url" --merge --auto
 
           echo "PR merged successfully!"
+
+      - name: Cleanup Intermediate Branch
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ inputs.version }}"
+          INTERMEDIATE_BRANCH="sync-release-to-main-v$VERSION"
+
+          echo "Cleaning up intermediate branch: $INTERMEDIATE_BRANCH"
+          git push origin --delete "$INTERMEDIATE_BRANCH" || echo "Branch already deleted or doesn't exist"
